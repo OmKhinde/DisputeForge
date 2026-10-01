@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "disputeforge-fastapi-service"
+version = "0.1.0"
+description = "DisputeForge FastAPI service — stateless LangGraph agent for dispute resolution"
+authors = ["DisputeForge"]
+readme = "README.md"
+packages = [{include = "app"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.6"
+uvicorn = {extras = ["standard"], version = "^0.34.0"}
+httpx = "^0.28.1"
+pydantic = "^2.10.4"
+pydantic-settings = "^2.7.1"
+
+# NOTE: No database client libraries here — FastAPI NEVER touches Postgres
+# directly (AGENTS.md rule #1). All DB access goes through Node's internal API.
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+pytest-asyncio = "^0.25.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

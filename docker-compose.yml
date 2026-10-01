@@ -1,0 +1,116 @@
+# ============================================================
+# DisputeForge — Docker Compose (Local Development)
+# ============================================================
+# Services: Redis, Kafka (KRaft — no Zookeeper), Node, FastAPI
+# Neon (Postgres) is cloud-hosted — NOT included here.
+# ============================================================
+
+services:
+  # ── Redis ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Kafka (KRaft mode — no Zookeeper needed) ────────────────
+  # Using official Apache Kafka image with native KRaft support
+  kafka:
+    image: apache/kafka:3.9.0
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      # KRaft mode — built into the official image
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Listeners
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Cluster
+      CLUSTER_ID: disputeforge-local-001
+      # Topic defaults
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Node Service (Express + Prisma) ─────────────────────────
+  node-service:
+    build:
+      context: ./node-service
+      target: dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_PORT=3000
+      - NODE_ENV=development
+      - DATABASE_URL=${DATABASE_URL:-postgresql://placeholder:placeholder@localhost:5432/disputeforge}
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - INTERNAL_SERVICE_TOKEN=${INTERNAL_SERVICE_TOKEN:-dev-service-token}
+      - CLERK_PUBLISHABLE_KEY=${CLERK_PUBLISHABLE_KEY:-pk_test_placeholder}
+      - CLERK_SECRET_KEY=${CLERK_SECRET_KEY:-sk_test_placeholder}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_test_placeholder}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./node-service:/app
+      - /app/node_modules
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── FastAPI Service (LangGraph Agent) ───────────────────────
+  fastapi-service:
+    build:
+      context: ./fastapi-service
+    ports:
+      - "8000:8000"
+    environment:
+      - FASTAPI_PORT=8000
+      - KAFKA_BROKERS=kafka:9092
+      - REDIS_URL=redis://redis:6379
+      - INTERNAL_SERVICE_TOKEN=${INTERNAL_SERVICE_TOKEN:-dev-service-token}
+      - NODE_SERVICE_URL=http://node-service:3000
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./fastapi-service:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  redis-data:
+  kafka-data:
